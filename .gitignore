@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+hash_cache.json
+hash_cache.json.tmp
