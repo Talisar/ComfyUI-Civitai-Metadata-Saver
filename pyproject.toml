@@ -1,12 +1,12 @@
 [project]
-name = "comfyui-civitai-metadata-saver"
-description = "Save Image node that writes A1111-style metadata (prompts, seed, sampler, model and LoRA hashes) that Civitai reads automatically. Traces complex graphs, LLM prompt expanders and rgthree Power Lora Loader. Also includes KoboldCpp prompt generation with a pause-to-review/edit node."
-version = "1.1.0"
+name = "comfyui-talisar-pack"
+description = "Talisar's ComfyUI node pack. Save Image (Civitai Metadata): writes A1111-style metadata (prompts, seed, sampler, model and LoRA hashes) that Civitai reads automatically. Traces complex graphs, LLM prompt expanders and rgthree Power Lora Loader. KoboldCpp Prompt: generates prompts with a local LLM. Review & Edit Prompt: pauses the run to review/edit a prompt."
+version = "1.2.0"
 license = { file = "LICENSE" }
 dependencies = []
 
 [project.urls]
-Repository = "https://github.com/Talisar/ComfyUI-Civitai-Metadata-Saver"
+Repository = "https://github.com/Talisar/ComfyUI-Talisar-Pack"
 
 [tool.comfy]
-DisplayName = "Civitai Metadata Saver"
+DisplayName = "Talisar Node Pack"
