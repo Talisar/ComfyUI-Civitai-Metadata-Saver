@@ -1,4 +1,36 @@
-# Save Image (Civitai Metadata) for ComfyUI
+# Talisar's ComfyUI Node Pack
+
+A small collection of ComfyUI custom nodes:
+
+| Node | Category | What it does |
+| --- | --- | --- |
+| [Save Image (Civitai Metadata)](#save-image-civitai-metadata) | `image` | Saves images with A1111-style metadata (prompts, seed, sampler, model and LoRA hashes) that Civitai reads automatically. |
+| [KoboldCpp Prompt](#koboldcpp-prompt) | `text` | Writes a prompt with a local LLM running in KoboldCpp, using your saved context/guidelines. |
+| [Review & Edit Prompt](#review--edit-prompt) | `text` | Pauses the run so you can read and edit a prompt before it's used. |
+
+More nodes will be added over time. No extra Python packages are needed.
+
+## Installation
+
+**ComfyUI-Manager:** *Manager → Install via Git URL* and paste:
+
+```
+https://github.com/Talisar/ComfyUI-Talisar-Pack
+```
+
+**Manual:** from your `ComfyUI/custom_nodes` folder:
+
+```bash
+git clone https://github.com/Talisar/ComfyUI-Talisar-Pack
+```
+
+Restart ComfyUI.
+
+To update, run `git pull` inside the `ComfyUI-Talisar-Pack` folder (or use ComfyUI-Manager), then restart ComfyUI.
+
+**Upgrading from ComfyUI-Civitai-Metadata-Saver:** this pack is the same repository under a new name, and node IDs are unchanged, so existing workflows keep working. In your existing checkout, optionally point git at the new address with `git remote set-url origin https://github.com/Talisar/ComfyUI-Talisar-Pack.git` (the old URL still redirects).
+
+## Save Image (Civitai Metadata)
 
 A drop-in replacement for ComfyUI's Save Image node that writes **A1111-style generation metadata** that Civitai reads automatically when you upload: prompt, negative prompt, seed, steps, sampler, scheduler, CFG, size, checkpoint and LoRAs. It includes **model/LoRA hashes**, so Civitai links your resources on its own.
 
@@ -14,31 +46,13 @@ Most older "A1111 format" savers only work when a KSampler is wired straight to 
 
 The ComfyUI workflow is still embedded in PNGs, so saved images drag back into ComfyUI as usual.
 
-## Installation
-
-**ComfyUI-Manager:** *Manager → Install via Git URL* and paste:
-
-```
-https://github.com/Talisar/ComfyUI-Civitai-Metadata-Saver
-```
-
-**Manual:** from your `ComfyUI/custom_nodes` folder:
-
-```bash
-git clone https://github.com/Talisar/ComfyUI-Civitai-Metadata-Saver
-```
-
-Restart ComfyUI. No extra Python packages are needed.
-
-To update, run `git pull` inside the `ComfyUI-Civitai-Metadata-Saver` folder (or use ComfyUI-Manager), then restart ComfyUI.
-
-## Usage
+### Usage
 
 Add **Save Image (Civitai Metadata)** (category `image`) and connect your images to it, the same way as the regular Save Image node. That's all it needs: everything else is read from the workflow.
 
 The `parameters` output contains the exact text written to the image. Connect it to a Show Text / Preview Any node to check it before uploading.
 
-### Inputs
+#### Inputs
 
 | Input | Description |
 | --- | --- |
@@ -59,7 +73,7 @@ The `parameters` output contains the exact text written to the image. Connect it
 | `positive_override` / `negative_override` | Optional: use this text instead of the traced prompt. |
 | `extra_parameters` | Optional extra A1111 fields appended verbatim, e.g. `Shift: 4`. |
 
-### Naming keys
+#### Naming keys
 
 The filename and folder name are each built from the prefix followed by keys, joined with the delimiter. This uses the same conventions as [Save Image Extended](https://github.com/audioscavenger/save-image-extended-comfyui), so existing settings carry over.
 
@@ -85,9 +99,27 @@ The filename and folder name are each built from the prefix followed by keys, jo
 
 Folder names can't leave the ComfyUI output directory (`..` is ignored).
 
+### What gets written
+
+A PNG `parameters` text chunk (or EXIF UserComment for JPG/WebP) in the format Automatic1111 uses:
+
+```
+a photo of a cat on a swing
+<lora:MyLora:0.8>
+Negative prompt: blurry
+Steps: 25, Sampler: DPM++ 2M, Schedule type: Karras, CFG scale: 6, Seed: 123456789, Size: 1024x1024, Model hash: 14ba3e3b67, Model: myModel, Lora hashes: "MyLora: b71fef1e25", Hashes: {"model": "14ba3e3b67", "lora:MyLora": "b71fef1e25"}, Version: ComfyUI
+```
+
+Hashes are Civitai's AutoV2 format (the first 10 characters of the file's SHA-256). Hashing a large model the first time takes a while (about 30 s for a 13 GB file). Results are cached in `hash_cache.json` in the node folder and reused until the file changes.
+
+### Civitai notes
+
+- Civitai can only link a model or LoRA that is published on Civitai. Your own unpublished LoRAs show as *"could not be matched"*, but their names and tags are still in the metadata.
+- If Civitai reads nothing from a PNG, try saving with `embed_workflow` off so only the A1111 metadata is present.
+
 ## KoboldCpp Prompt + Review & Edit Prompt
 
-Two extra nodes (category `text`) for writing prompts with a local LLM running in [KoboldCpp](https://github.com/LostRuins/koboldcpp), then checking them before they're used:
+Two nodes (category `text`) for writing prompts with a local LLM running in [KoboldCpp](https://github.com/LostRuins/koboldcpp), then checking them before they're used:
 
 ```
 KoboldCpp Prompt ──prompt──▶ Review & Edit Prompt ──text──▶ CLIP Text Encode ──▶ ... ──▶ Save Image (Civitai Metadata)
@@ -127,27 +159,9 @@ Pauses the run and opens an editor with the incoming text. Edit it, then click *
 
 The Civitai saver records the final, edited prompt that reaches the text encoder.
 
-## What gets written
-
-A PNG `parameters` text chunk (or EXIF UserComment for JPG/WebP) in the format Automatic1111 uses:
-
-```
-a photo of a cat on a swing
-<lora:MyLora:0.8>
-Negative prompt: blurry
-Steps: 25, Sampler: DPM++ 2M, Schedule type: Karras, CFG scale: 6, Seed: 123456789, Size: 1024x1024, Model hash: 14ba3e3b67, Model: myModel, Lora hashes: "MyLora: b71fef1e25", Hashes: {"model": "14ba3e3b67", "lora:MyLora": "b71fef1e25"}, Version: ComfyUI
-```
-
-Hashes are Civitai's AutoV2 format (the first 10 characters of the file's SHA-256). Hashing a large model the first time takes a while (about 30 s for a 13 GB file). Results are cached in `hash_cache.json` in the node folder and reused until the file changes.
-
-## Civitai notes
-
-- Civitai can only link a model or LoRA that is published on Civitai. Your own unpublished LoRAs show as *"could not be matched"*, but their names and tags are still in the metadata.
-- If Civitai reads nothing from a PNG, try saving with `embed_workflow` off so only the A1111 metadata is present.
-
 ## Troubleshooting
 
-Errors are logged to the ComfyUI console with the prefix `[Civitai Metadata]`. If a field is missing or wrong for your workflow, open an issue with the workflow (or the saved PNG) attached.
+Messages are logged to the ComfyUI console with the prefix `[Civitai Metadata]` (Save Image) or `[KoboldCpp Prompt]`. If something is missing or wrong for your workflow, [open an issue](https://github.com/Talisar/ComfyUI-Talisar-Pack/issues) with the workflow (or the saved PNG) attached.
 
 ## License
 
