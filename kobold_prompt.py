@@ -6,8 +6,10 @@ seen by API calls, so the node sends its context block as the system message on 
 
 import json
 import logging
+import hashlib
 import math
 import os
+import random
 import re
 import threading
 import time
@@ -143,6 +145,152 @@ def list_presets():
         return []
 
 
+# ---------------------------------------------------------------- randomized slots
+
+# (input name, label in the request, default options). One option per line; "text|weight" sets a weight.
+SLOTS = [
+    ("angle", "camera angle", [
+        "Eye level, facing the camera directly or turned slightly|3",
+        "Camera slightly above eye level, she looks up into the lens|2",
+        "Camera slightly below eye level, looking up at her face|2",
+        "Three-quarter view or side profile|1",
+    ]),
+    ("expression", "expression", [
+        "neutral and relaxed", "calm", "smirking or playful", "angry", "quiet half-smile", "looking away thoughtfully",
+        "tired or sleepy", "skeptical", "flirtatious", "determined", "laughing|0.5", "crying|0.5",
+    ]),
+    ("lighting", "lighting", [
+        "warm lamp light", "golden hour window light", "night street light", "neon", "backlit", "hard side light",
+        "overcast daylight", "harsh midday sun", "cool bluish light",
+    ]),
+    ("clothing_color", None, ["red", "white", "black", "grey", "navy", "yellow", "burgundy", "denim blue", "cream|0.5"]),
+    ("clothing_type", None, [
+        "t-shirt", "hoodie", "sweater", "button-up shirt", "leather jacket", "denim jacket", "tank top", "turtleneck",
+        "blouse", "workout top",
+    ]),
+    ("hairstyle", "hairstyle", ["loose and long|4", "ponytail", "low bun", "updo", "windblown", "tucked behind one ear", "sleek"]),
+    ("setting", "setting", [
+        "city street", "cafe", "kitchen", "park", "beach", "office", "car interior", "rooftop", "subway platform",
+        "bedroom", "gym", "rainy window", "forest trail", "bar", "bookstore|0.5",
+    ]),
+]
+SLOT_NAMES = [name for name, _, _ in SLOTS]
+COMBO_SLOTS = ("angle", "expression", "lighting", "setting")  # this combination isn't repeated within RECENT_RUNS
+RECENT_RUNS = 8
+REROLLS = 6
+_NODE_DIR = os.path.dirname(os.path.abspath(__file__))
+PICKS_FILE = os.path.join(_NODE_DIR, "koboldcpp_recent_picks.json")
+CONVERSATION_FILE = os.path.join(_NODE_DIR, "koboldcpp_conversation.json")
+_file_lock = threading.Lock()
+
+
+def _load_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+    except Exception as e:
+        logging.warning(f"[KoboldCpp Prompt] ignoring unreadable {os.path.basename(path)}: {e}")
+        return default
+
+
+def _save_json(path, data):
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+    except OSError as e:
+        logging.warning(f"[KoboldCpp Prompt] couldn't write {os.path.basename(path)}: {e}")
+
+
+def parse_options(text):
+    """[(option, weight)] from one-option-per-line text; 'text|2' weights an option, weight 0 turns it off."""
+    options = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        weight = 1.0
+        if "|" in line:
+            head, tail = line.rsplit("|", 1)
+            try:
+                weight, line = float(tail), head.strip()
+            except ValueError:
+                pass
+        if line and weight > 0:
+            options.append((line, weight))
+    return options
+
+
+def _signature(slot_options):
+    return hashlib.sha1(json.dumps(slot_options, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def pick_slots(seed, slot_texts):
+    """Weighted picks per slot from random.Random(seed), avoiding the previous run's values and the
+    angle/expression/lighting/setting combinations of the last RECENT_RUNS runs (kept on disk).
+    Re-running a seed that's still in the recent list gives back exactly the same picks."""
+    slot_options = {name: parse_options(slot_texts.get(name, "")) for name in SLOT_NAMES}
+    slot_options = {k: v for k, v in slot_options.items() if v}
+    if not slot_options:
+        return {}
+    sig = _signature(slot_options)
+    with _file_lock:
+        recent = _load_json(PICKS_FILE, [])
+        if not isinstance(recent, list):
+            recent = []
+        for entry in recent:
+            if entry.get("seed") == seed and entry.get("options") == sig:
+                return entry["picks"]
+
+        rng = random.Random(seed)
+        draw = lambda name: rng.choices([o for o, _ in slot_options[name]], [w for _, w in slot_options[name]])[0]
+        last = recent[-1]["picks"] if recent else {}
+        combos = {tuple(e["picks"].get(k) for k in COMBO_SLOTS) for e in recent[-RECENT_RUNS:]}
+
+        def roll(name):
+            value = draw(name)
+            for _ in range(REROLLS):
+                if value != last.get(name) or len({o for o, _ in slot_options[name]}) < 2:
+                    break
+                value = draw(name)
+            return value
+
+        picks = {name: roll(name) for name in slot_options}
+        combo_slots = [k for k in COMBO_SLOTS if k in picks]
+        for _ in range(REROLLS * 2):
+            if not combo_slots or tuple(picks.get(k) for k in COMBO_SLOTS) not in combos:
+                break
+            name = rng.choice(combo_slots)
+            picks[name] = roll(name)
+
+        recent.append({"seed": seed, "options": sig, "picks": picks, "time": time.strftime("%Y-%m-%d %H:%M:%S")})
+        _save_json(PICKS_FILE, recent[-RECENT_RUNS:])
+    return picks
+
+
+def choices_sentence(picks):
+    parts = []
+    for name, label, _ in SLOTS:
+        if name == "clothing_type":
+            continue
+        if name == "clothing_color":
+            clothing = " ".join(picks[k] for k in ("clothing_color", "clothing_type") if k in picks)
+            if clothing:
+                parts.append(f"clothing: {clothing}")
+        elif name in picks:
+            parts.append(f"{label}: {picks[name]}")
+    if not parts:
+        return ""
+    return f"Use exactly these choices: {'; '.join(parts)}. Do not substitute other options."
+
+
+def picks_line(picks):
+    return " | ".join(f"{name}={picks[name]}" for name in SLOT_NAMES if name in picks)
+
+
 # ---------------------------------------------------------------- review pause
 
 class _Pending:
@@ -236,7 +384,14 @@ async def _review_answer(request):
 
 # ---------------------------------------------------------------- nodes
 
-_history = {}  # node_id -> {"context": str, "turns": [(user, assistant), ...]}
+# node_id -> {"context": sha1 of the context, "turns": [[user, assistant], ...]}; kept on disk so it survives restarts
+_history = _load_json(CONVERSATION_FILE, {})
+if not isinstance(_history, dict):
+    _history = {}
+
+
+def _context_key(context):
+    return hashlib.sha1(context.encode("utf-8")).hexdigest()
 
 
 class KoboldCppPrompt:
@@ -256,30 +411,45 @@ class KoboldCppPrompt:
                 "keep_conversation": ("BOOLEAN", {"default": False, "tooltip": "Send recent requests/replies too, so follow-ups like 'same scene at dawn' work. Cleared when the context changes."}),
                 "history_turns": ("INT", {"default": 3, "min": 1, "max": 20, "tooltip": "How many earlier request/reply pairs to include when keep_conversation is on."}),
             },
+            # optional, after the old inputs, so saved workflows keep their widget order
+            "optional": {
+                "randomize_slots": ("BOOLEAN", {"default": True, "tooltip": "Pick an angle, expression, lighting, clothing, hairstyle and setting from the lists below (using the seed) and tell the model to use exactly those. Avoids repeating the last runs, even after a restart."}),
+                **{name: ("STRING", {"default": "\n".join(default), "multiline": True,
+                                     "tooltip": f"{name.replace('_', ' ').capitalize()} options, one per line. Add |weight to make one more or less likely, e.g. 'neon|2' or 'neon|0.5'. Empty = leave this slot to the model."})
+                   for name, _, default in SLOTS},
+            },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("prompt", "model", "raw_reply")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("prompt", "model", "raw_reply", "picks")
     FUNCTION = "generate"
     CATEGORY = "text"
     DESCRIPTION = "Asks a local KoboldCpp server to write an image prompt from your request and standing guidelines."
 
     def generate(self, server_url, context, request, required_phrase, phrase_position, max_tokens, temperature, seed,
-                 clean_output, keep_conversation, history_turns, unique_id=None):
+                 clean_output, keep_conversation, history_turns, unique_id=None, randomize_slots=False, **slot_texts):
         if not request.strip() and not context.strip():
             raise ValueError("KoboldCpp Prompt: enter a request (and/or a context block).")
+        # randomize_slots defaults to off here so an API-format prompt saved before it existed runs as before
+        picks = pick_slots(seed, {n: slot_texts.get(n, "\n".join(d)) for n, _, d in SLOTS}) if randomize_slots else {}
+        user_text = request.strip()
+        sentence = choices_sentence(picks)
+        if sentence:
+            user_text = f"{user_text}\n\n{sentence}" if user_text else sentence
+
         key = str(unique_id)
+        ctx_key = _context_key(context)
         hist = _history.get(key)
-        if not keep_conversation or hist is None or hist["context"] != context:
-            hist = {"context": context, "turns": []}
+        if not keep_conversation or not isinstance(hist, dict) or hist.get("context") != ctx_key:
+            hist = {"context": ctx_key, "turns": []}
         messages = []
         if context.strip():
             messages.append({"role": "system", "content": context})
         if keep_conversation:
             for user, assistant in hist["turns"][-history_turns:]:
                 messages += [{"role": "user", "content": user}, {"role": "assistant", "content": assistant}]
-        messages.append({"role": "user", "content": request.strip() or "Write the prompt."})
+        messages.append({"role": "user", "content": user_text or "Write the prompt."})
 
         raw, model = chat(server_url, messages, max_tokens, temperature, seed)
         if not model or model.lower() in ("koboldcpp", "gpt-3.5-turbo"):
@@ -290,13 +460,20 @@ class KoboldCppPrompt:
         text = ensure_phrase(text, required_phrase, phrase_position)
 
         if keep_conversation:
-            hist["turns"].append((request.strip(), text))
+            hist["turns"].append([user_text, text])
             hist["turns"] = hist["turns"][-20:]
             _history[key] = hist
+            changed = True
         else:
-            _history.pop(key, None)
+            changed = _history.pop(key, None) is not None
+        if changed:
+            with _file_lock:
+                _save_json(CONVERSATION_FILE, _history)
+        picks_text = picks_line(picks)
+        if picks_text:
+            logging.info(f"[KoboldCpp Prompt] picks: {picks_text}")
         logging.info(f"[KoboldCpp Prompt] {model}: {text[:200]}")
-        return {"ui": {"model": [model], "text": [text]}, "result": (text, model, raw)}
+        return {"ui": {"model": [model], "text": [text], "picks": [picks_text]}, "result": (text, model, raw, picks_text)}
 
 
 class ReviewEditPrompt:

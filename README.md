@@ -138,14 +138,18 @@ Start KoboldCpp with any text model first (Kobold Lite's default address is `htt
 | `max_tokens`, `temperature` | Generation settings. Reasoning models need a higher `max_tokens`. |
 | `seed` | With the same seed and inputs, ComfyUI reuses the last prompt instead of asking again. Set it to `fixed` to keep a prompt while you change image settings. |
 | `clean_output` | Keep only the prompt: unwraps a ```` ``` ```` code block, drops "Here's your prompt:" lines, `**Prompt:**`-style labels, markdown bold and `<think>` reasoning. |
-| `keep_conversation`, `history_turns` | Also send your last few requests and replies, so follow-ups like `same scene at dawn` work. Cleared when the context changes or ComfyUI restarts. |
+| `keep_conversation`, `history_turns` | Also send your last few requests and replies, so follow-ups like `same scene at dawn` work. Cleared when the context changes. Saved in `koboldcpp_conversation.json` in the node folder, so it survives a restart. |
+| `randomize_slots` | On (default): picks a camera angle, expression, lighting, clothing colour and type, hairstyle and setting from the lists below, using `seed`, and adds `Use exactly these choices: ... Do not substitute other options.` to the request. Off: the request is sent as is. |
+| `angle`, `expression`, `lighting`, `clothing_color`, `clothing_type`, `hairstyle`, `setting` | The options for each slot, one per line. Add `\|weight` to make one more or less likely (`neon\|2`, `cream\|0.5`, `\|0` turns it off). Leave a list empty to let the model choose that part. |
 
 Under the inputs the node shows:
 
 - **Status line:** the model KoboldCpp has loaded and its context size (green), or an orange warning when KoboldCpp isn't running or has no model loaded. It refreshes when the workflow opens, on every run, when you change `server_url`, and with the ↻ button.
 - **Context files:** pick a saved context and click **Load** to copy it into the `context` box, or **Save…** to write the box to a `.txt` file. Files live in `ComfyUI/user/prompt_contexts/` and can be edited in any text editor. Loading is a one-time copy: later edits in the box stay in the workflow until you save them.
 
-Outputs: `prompt` (cleaned text), `model` (the LLM that wrote it) and `raw_reply` (the unedited reply).
+Outputs: `prompt` (cleaned text), `model` (the LLM that wrote it), `raw_reply` (the unedited reply) and `picks` (this run's slot choices on one line, e.g. `angle=... | expression=angry | lighting=neon | ...`; empty when `randomize_slots` is off).
+
+**How picks avoid repeats:** the last 8 runs' picks are kept in `koboldcpp_recent_picks.json` in the node folder, so this works across restarts. Each slot is re-rolled (with the same seeded generator) if it matches the previous run, and the angle + expression + lighting + setting combination is never one of the last 8. Re-running a seed that's still in that list gives back exactly the same picks.
 
 ### Review & Edit Prompt
 
