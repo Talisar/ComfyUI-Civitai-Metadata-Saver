@@ -105,7 +105,7 @@ Start KoboldCpp with any text model first (Kobold Lite's default address is `htt
 | `required_phrase` | Optional exact text the prompt must contain. If the model leaves it out, it's inserted word for word at `phrase_position` (`start` / `end`). |
 | `max_tokens`, `temperature` | Generation settings. Reasoning models need a higher `max_tokens`. |
 | `seed` | With the same seed and inputs, ComfyUI reuses the last prompt instead of asking again. Set it to `fixed` to keep a prompt while you change image settings. |
-| `clean_output` | Keep only the prompt: unwraps a ```` ``` ```` code block, drops "Here's your prompt:" lines and `<think>` reasoning. |
+| `clean_output` | Keep only the prompt: unwraps a ```` ``` ```` code block, drops "Here's your prompt:" lines, `**Prompt:**`-style labels, markdown bold and `<think>` reasoning. |
 | `keep_conversation`, `history_turns` | Also send your last few requests and replies, so follow-ups like `same scene at dawn` work. Cleared when the context changes or ComfyUI restarts. |
 
 Under the inputs the node shows:

@@ -86,11 +86,14 @@ def chat(url, messages, max_tokens, temperature, seed):
 
 _THINK = re.compile(r"<think>.*?</think>", re.S | re.I)
 _FENCE = re.compile(r"```[^\n`]*\n?(.*?)```", re.S)
+# "**Prompt:**", "### Final Prompt", "Image prompt -" ... at the very start of the reply
+_LABEL = re.compile(r"^\s*(?:#+\s*)?[*_]{0,2}\s*(?:final |image |positive |generated |your )?prompt\b"
+                    r"(?:[ \t]*[*_]{0,2}[ \t]*[:\-–—][ \t]*[*_]{0,2}[ \t]*\n?|[ \t]*[*_]{0,2}[ \t]*\n|[*_]{1,2}[ \t]*)", re.I)
 _QUOTES = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"})
 
 
 def clean_reply(text):
-    """Keep only the prompt: drop <think> blocks, unwrap a code block, drop a 'Here's your prompt:' lead-in."""
+    """Keep only the prompt: drop <think> blocks, unwrap a code block, drop 'Here's your prompt:' / '**Prompt:**' lead-ins."""
     text = _THINK.sub("", text)
     low = text.lower()
     if "</think>" in low:  # chat template opened the <think> block itself
@@ -102,8 +105,10 @@ def clean_reply(text):
         text = max(blocks, key=len)
     text = text.strip()
     lines = text.split("\n")
-    if len(lines) > 1 and lines[0].rstrip().endswith(":") and len(lines[0]) < 120:
+    if len(lines) > 1 and lines[0].rstrip(" *_").endswith(":") and len(lines[0]) < 120 and not _LABEL.match(lines[0] + "\n"):
         text = "\n".join(lines[1:]).strip()
+    text = _LABEL.sub("", text, count=1).strip()
+    text = text.replace("**", "")  # markdown bold means nothing to the text encoder
     if len(text) > 1 and text[0] == text[-1] and text[0] in "\"'" and text.count(text[0]) == 2:
         text = text[1:-1].strip()
     return text
