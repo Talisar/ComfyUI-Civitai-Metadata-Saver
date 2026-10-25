@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-civitai-metadata-saver"
-description = "Save Image node that writes A1111-style metadata (prompts, seed, sampler, model and LoRA hashes) that Civitai reads automatically. Traces complex graphs, LLM prompt expanders and rgthree Power Lora Loader."
-version = "1.0.0"
+description = "Save Image node that writes A1111-style metadata (prompts, seed, sampler, model and LoRA hashes) that Civitai reads automatically. Traces complex graphs, LLM prompt expanders and rgthree Power Lora Loader. Also includes KoboldCpp prompt generation with a pause-to-review/edit node."
+version = "1.1.0"
 license = { file = "LICENSE" }
 dependencies = []
 
