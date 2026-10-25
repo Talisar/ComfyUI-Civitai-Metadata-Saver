@@ -85,6 +85,48 @@ The filename and folder name are each built from the prefix followed by keys, jo
 
 Folder names can't leave the ComfyUI output directory (`..` is ignored).
 
+## KoboldCpp Prompt + Review & Edit Prompt
+
+Two extra nodes (category `text`) for writing prompts with a local LLM running in [KoboldCpp](https://github.com/LostRuins/koboldcpp), then checking them before they're used:
+
+```
+KoboldCpp Prompt ──prompt──▶ Review & Edit Prompt ──text──▶ CLIP Text Encode ──▶ ... ──▶ Save Image (Civitai Metadata)
+```
+
+Start KoboldCpp with any text model first (Kobold Lite's default address is `http://localhost:5001`). No extra Python packages are needed.
+
+### KoboldCpp Prompt
+
+| Input | Description |
+| --- | --- |
+| `server_url` | KoboldCpp's address. |
+| `context` | Your standing guidelines, sent as the system message on **every** request. KoboldCpp's API doesn't see Kobold Lite's Memory or chat, so put them here. Saved with the workflow. |
+| `request` | What you want this time, e.g. `rooftop cafe at dusk, laughing`. |
+| `required_phrase` | Optional exact text the prompt must contain. If the model leaves it out, it's inserted word for word at `phrase_position` (`start` / `end`). |
+| `max_tokens`, `temperature` | Generation settings. Reasoning models need a higher `max_tokens`. |
+| `seed` | With the same seed and inputs, ComfyUI reuses the last prompt instead of asking again. Set it to `fixed` to keep a prompt while you change image settings. |
+| `clean_output` | Keep only the prompt: unwraps a ```` ``` ```` code block, drops "Here's your prompt:" lines, `**Prompt:**`-style labels, markdown bold and `<think>` reasoning. |
+| `keep_conversation`, `history_turns` | Also send your last few requests and replies, so follow-ups like `same scene at dawn` work. Cleared when the context changes or ComfyUI restarts. |
+
+Under the inputs the node shows:
+
+- **Status line:** the model KoboldCpp has loaded and its context size (green), or an orange warning when KoboldCpp isn't running or has no model loaded. It refreshes when the workflow opens, on every run, when you change `server_url`, and with the ↻ button.
+- **Context files:** pick a saved context and click **Load** to copy it into the `context` box, or **Save…** to write the box to a `.txt` file. Files live in `ComfyUI/user/prompt_contexts/` and can be edited in any text editor. Loading is a one-time copy: later edits in the box stay in the workflow until you save them.
+
+Outputs: `prompt` (cleaned text), `model` (the LLM that wrote it) and `raw_reply` (the unedited reply).
+
+### Review & Edit Prompt
+
+Pauses the run and opens an editor with the incoming text. Edit it, then click **Continue** (or Ctrl+Enter) to send your version on, or **Cancel run** to stop. If you reload the page while it's waiting, the editor opens again. The approved text is shown on the node afterwards.
+
+| `pause` | Behavior |
+| --- | --- |
+| `when text changes` | Pauses for each new prompt. Rerunning with the same prompt (e.g. new image seed) reuses your edit without asking. |
+| `every run` | Always pauses. |
+| `off` | Passes the text straight through. |
+
+The Civitai saver records the final, edited prompt that reaches the text encoder.
+
 ## What gets written
 
 A PNG `parameters` text chunk (or EXIF UserComment for JPG/WebP) in the format Automatic1111 uses:
