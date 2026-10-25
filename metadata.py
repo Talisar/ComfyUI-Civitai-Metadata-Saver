@@ -263,15 +263,37 @@ class GraphReader:
                 return True
             return False
 
-        def follow(name, node):
-            if name in NON_COND_INPUTS:
-                return False
-            ins = node.get("inputs", {})
-            cond_inputs = [k for k, v in ins.items() if is_link(v) and ("cond" in k.lower() or k in ("positive", "negative"))]
-            return name in cond_inputs if cond_inputs else True
-
-        self.bfs(cond_link, match, follow)
+        # Walk upstream link by link (not node by node): nodes such as ControlNetApplyAdvanced,
+        # InpaintModelConditioning or Qwen/Wan edit helpers take both "positive" and
+        # "negative" and output them in that order, so only the input matching the output
+        # we arrived through belongs to this side.
+        if not is_link(cond_link):
+            return ""
+        seen = set()
+        q = deque([(str(cond_link[0]), cond_link[1])])
+        while q and len(seen) < 500:
+            nid, out_idx = q.popleft()
+            if (nid, out_idx) in seen:
+                continue
+            seen.add((nid, out_idx))
+            node = self.node(nid)
+            if node is None or match(nid, node):
+                continue
+            for name in self.cond_inputs(node, out_idx):
+                v = node["inputs"][name]
+                q.append((str(v[0]), v[1]))
         return "\n".join(t.strip() for t in texts)
+
+    @staticmethod
+    def cond_inputs(node, out_idx):
+        """Input names to follow upstream when tracing conditioning out of output out_idx."""
+        ins = node.get("inputs", {})
+        links = [k for k, v in ins.items() if is_link(v) and k not in NON_COND_INPUTS]
+        if "positive" in ins and "negative" in ins:
+            side = {0: "positive", 1: "negative"}.get(out_idx)
+            return [side] if side and is_link(ins.get(side)) else []
+        cond = [k for k in links if "cond" in k.lower() or k in ("positive", "negative")]
+        return cond or links
 
     def model_chain(self, model_link):
         """Return (model_name, model_folder, [(lora_name, strength), ...]) walking up the model input."""
@@ -355,6 +377,10 @@ def extract(prompt, image_link, runtime=None):
     info.update({k: p[k] for k in ("seed", "steps", "cfg", "sampler_name", "scheduler", "denoise", "guidance")})
     info["positive"] = g.conditioning_text(p["positive"])
     info["negative"] = g.conditioning_text(p["negative"])
+    if info["negative"] and info["negative"].strip() == info["positive"].strip():
+        # Negative wired to the same conditioning as the positive (common in CFG 1 edit
+        # workflows where the negative is ignored anyway): not a real negative prompt.
+        info["negative"] = ""
     info["model"], info["model_folder"], info["loras"] = g.model_chain(p["model"])
     return info
 
