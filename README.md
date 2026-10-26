@@ -143,6 +143,7 @@ Start KoboldCpp with any text model first (Kobold Lite's default address is `htt
 Under the inputs the node shows:
 
 - **Status line:** the model KoboldCpp has loaded and its context size (green), or an orange warning when KoboldCpp isn't running or has no model loaded. It refreshes when the workflow opens, on every run, when you change `server_url`, and with the ↻ button.
+- **🎲 Random request:** sets the request to `__random__`. Each run then writes a new prompt based only on your guidelines, with the camera angle, expression, lighting, setting, clothing and hair picked for you (see [wildcards](#wildcards)). The full instruction it sends is in `wildcards/random.txt`.
 - **Context files:** pick a saved context and click **Load** to copy it into the `context` box, or **Save…** to write the box to a `.txt` file. Files live in `ComfyUI/user/prompt_contexts/` and can be edited in any text editor. Loading is a one-time copy: later edits in the box stay in the workflow until you save them.
 
 Outputs: `prompt` (cleaned text), `model` (the LLM that wrote it), `raw_reply` (the unedited reply) and `picks` (what each wildcard became, on one line, e.g. `angle=... | expression=angry | lighting=neon | ...`; empty when the request has no wildcards).
@@ -154,7 +155,7 @@ LLMs have favourites: ask Gemma for a "random" portrait every run and you keep g
 - `{red|black|navy}` picks one option. `2::red` makes an option twice as likely.
 - `__setting__` picks a line from `setting.txt`. In the file, put one option per line. `neon|2` doubles an option's weight, `neon|0.5` halves it and `|0` turns it off. Lines starting with `#` are ignored. Wildcard files can contain wildcards themselves.
 - Starter lists come with the node in its `wildcards` folder: `__angle__`, `__expression__`, `__lighting__`, `__clothing_color__`, `__clothing_type__`, `__hairstyle__` and `__setting__`. To change one, or add your own, put a `.txt` file with the same name in `ComfyUI/user/prompt_wildcards/`. Files there win over the starter files, and updates to the node won't overwrite them.
-- Example request: `Random portrait. Camera: __angle__. Expression: __expression__. Lighting: __lighting__, setting: __setting__, wearing __clothing_color__ __clothing_type__, hair __hairstyle__.`
+- `__random__` (what the 🎲 button puts in) uses all of them. You can also write your own, e.g. `Random portrait. Camera: __angle__. Expression: __expression__. Lighting: __lighting__, setting: __setting__, wearing __clothing_color__ __clothing_type__, hair __hairstyle__.`
 
 When a request has wildcards, the node adds `Use the details above exactly as given; do not substitute other options.` to it.
 

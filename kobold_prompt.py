@@ -270,6 +270,9 @@ def expand_wildcards(text, seed):
                 while label in picks:  # the same wildcard used twice
                     label = f"{name or '{' + inline + '}'}#{n}"
                     n += 1
+                if len(options) == 1:  # a fixed template such as __random__: nothing was picked
+                    value = options[0][0]
+                    return expand(value, depth + 1) if depth < MAX_DEPTH else value
                 fresh = [(o, w) for o, w in options if o != last.get(label)] or options  # not the previous run's pick
                 value = rng.choices([o for o, _ in fresh], [w for _, w in fresh])[0]
                 picks[label] = value

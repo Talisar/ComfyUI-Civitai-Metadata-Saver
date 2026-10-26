@@ -85,12 +85,16 @@ function addPanel(node) {
   const select = el("select", { title: "Saved context files" });
   const load = el("button", { textContent: "Load", title: "Replace the context box with this file" });
   const save = el("button", { textContent: "Save…", title: "Save the context box to a .txt file" });
+  const random = el("button", { textContent: "🎲 Random request",
+    title: "Set the request to __random__: a new prompt based only on your guidelines (the context box), with camera angle, expression, lighting, setting, clothing and hair picked for you. Each run picks again and avoids the last runs' picks." });
   const status = el("div", { className: "kp-status" }, [dot, label]);
   const panel = el("div", { className: "kp-panel" }, [
     el("div", { className: "kp-row" }, [status, refresh]),
     el("div", { className: "kp-row" }, [select, load, save]),
+    el("div", { className: "kp-row" }, [random]),
   ]);
-  for (const e of [select, load, save, refresh]) e.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  random.style.flex = "1";
+  for (const e of [select, load, save, refresh, random]) e.addEventListener("pointerdown", (ev) => ev.stopPropagation());
 
   const setStatus = (s) => {
     dot.className = "kp-dot " + (s.ok ? "ok" : "bad");
@@ -125,6 +129,18 @@ function addPanel(node) {
   };
 
   refresh.onclick = () => node.kpRefresh();
+  random.onclick = async () => {
+    const req = widget(node, "request");
+    if (!req || req.value.trim() === "__random__") return;
+    if (req.value.trim()) {
+      const r = await modal({ title: "Replace the request with a random one?", note: "The request box becomes __random__. Each run then writes a new prompt from your guidelines with picked details.",
+        buttons: [{ label: "Cancel", value: null }, { label: "Replace", value: 1, primary: true }] });
+      if (!r.value) return;
+    }
+    req.value = "__random__";
+    req.callback?.(req.value);
+    node.setDirtyCanvas?.(true, true);
+  };
   load.onclick = async () => {
     if (!select.value) return;
     const ctx = widget(node, "context");
@@ -159,8 +175,8 @@ function addPanel(node) {
     serialize: false,
     getValue: () => "",
     setValue: () => {},
-    getMinHeight: () => 66,
-    getMaxHeight: () => 66,
+    getMinHeight: () => 94,
+    getMaxHeight: () => 94,
   });
 
   const urlWidget = widget(node, "server_url");
