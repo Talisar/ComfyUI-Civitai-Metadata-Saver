@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 hash_cache.json
 hash_cache.json.tmp
+koboldcpp_recent_picks.json
+koboldcpp_recent_picks.json.tmp
+koboldcpp_conversation.json
+koboldcpp_conversation.json.tmp

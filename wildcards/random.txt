@@ -1,0 +1,2 @@
+# Used by the node's Random button (the request becomes __random__). Edit a copy in ComfyUI/user/prompt_wildcards/.
+Write a new prompt based entirely on the guidelines. Use these details: camera: __angle__; expression: __expression__; lighting: __lighting__; setting: __setting__; clothing: __clothing_color__ __clothing_type__; hair: __hairstyle__.

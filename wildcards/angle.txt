@@ -1,0 +1,4 @@
+Eye level, facing the camera directly or turned slightly|3
+Camera slightly above eye level, she looks up into the lens|2
+Camera slightly below eye level, looking up at her face|2
+Three-quarter view or side profile|1

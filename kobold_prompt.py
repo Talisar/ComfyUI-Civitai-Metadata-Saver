@@ -6,8 +6,10 @@ seen by API calls, so the node sends its context block as the system message on 
 
 import json
 import logging
+import hashlib
 import math
 import os
+import random
 import re
 import threading
 import time
@@ -143,6 +145,161 @@ def list_presets():
         return []
 
 
+# ---------------------------------------------------------------- wildcards
+
+# {red|black|navy} picks one option inline ("2::red" weights it); __setting__ picks a line from setting.txt.
+# Picks use random.Random(seed), never repeat the previous run's value for a wildcard, and avoid the exact same
+# set of picks as any of the last RECENT_RUNS runs. That history is kept on disk, so it survives restarts.
+RECENT_RUNS = 8
+REROLLS = 12  # tries at a set of picks that isn't one of the last RECENT_RUNS
+MAX_DEPTH = 5  # wildcard files may contain wildcards
+_NODE_DIR = os.path.dirname(os.path.abspath(__file__))
+WILDCARD_DIRS = [os.path.join(folder_paths.get_user_directory(), "prompt_wildcards"), os.path.join(_NODE_DIR, "wildcards")]
+PICKS_FILE = os.path.join(_NODE_DIR, "koboldcpp_recent_picks.json")
+CONVERSATION_FILE = os.path.join(_NODE_DIR, "koboldcpp_conversation.json")
+CHOICES_NOTE = "Use the details above exactly as given; do not substitute other options."
+_WILDCARD = re.compile(r"__([\w\- /]+?)__|\{([^{}]*\|[^{}]*)\}")
+_file_lock = threading.Lock()
+
+
+def _load_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+    except Exception as e:
+        logging.warning(f"[KoboldCpp Prompt] ignoring unreadable {os.path.basename(path)}: {e}")
+        return default
+
+
+def _save_json(path, data):
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+    except OSError as e:
+        logging.warning(f"[KoboldCpp Prompt] couldn't write {os.path.basename(path)}: {e}")
+
+
+def _weighted(option, weight, text):
+    try:
+        weight = float(weight)
+    except ValueError:
+        return text, 1.0
+    return option.strip(), weight
+
+
+def parse_lines(text):
+    """[(option, weight)] from a wildcard file: one option per line, 'text|2' weights it, '|0' turns it off."""
+    options = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        option, weight = _weighted(*line.rsplit("|", 1), line) if "|" in line else (line, 1.0)
+        if option and weight > 0:
+            options.append((option, weight))
+    return options
+
+
+def parse_inline(body):
+    """[(option, weight)] from the inside of {a|2::b|c}."""
+    options = []
+    for part in body.split("|"):
+        part = part.strip()
+        option, weight = _weighted(*reversed(part.split("::", 1)), part) if "::" in part else (part, 1.0)
+        if option and weight > 0:
+            options.append((option, weight))
+    return options
+
+
+def list_wildcards():
+    names = set()
+    for d in WILDCARD_DIRS:
+        for root, _, files in os.walk(d):
+            for f in files:
+                if f.lower().endswith(".txt"):
+                    names.add(os.path.relpath(os.path.join(root, f[:-4]), d).replace(os.sep, "/"))
+    return sorted(names, key=str.lower)
+
+
+def _read_wildcard(name):
+    for d in WILDCARD_DIRS:  # the user folder wins over the starter files shipped with the node
+        path = os.path.normpath(os.path.join(d, name.strip() + ".txt"))
+        if path.startswith(os.path.normpath(d) + os.sep) and os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+    available = ", ".join(f"__{n}__" for n in list_wildcards()) or "none"
+    raise ValueError(f"KoboldCpp Prompt: no wildcard file for __{name}__. Add {name}.txt to {WILDCARD_DIRS[0]} (available: {available}).")
+
+
+def expand_wildcards(text, seed):
+    """(text with every wildcard replaced, {label: pick}). Text without wildcards comes back unchanged."""
+    if not _WILDCARD.search(text):
+        return text, {}
+    with _file_lock:
+        recent = _load_json(PICKS_FILE, [])
+        if not isinstance(recent, list):
+            recent = []
+        files = {}
+
+        def lookup(name):
+            if name not in files:
+                files[name] = _read_wildcard(name)
+            return files[name]
+
+        # what the result depends on, so a seed that's re-run with the same request/lists gives the same picks
+        def signature():
+            return hashlib.sha1(json.dumps([text, files], sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+        rng = random.Random(seed)
+        last = recent[-1]["picks"] if recent else {}
+        seen = {tuple(sorted(e["picks"].items())) for e in recent[-RECENT_RUNS:]}
+        picks = {}
+
+        def expand(s, depth):
+            def one(m):
+                name, inline = m.group(1), m.group(2)
+                options = parse_lines(lookup(name)) if name else parse_inline(inline)
+                if not options:
+                    return ""
+                label = name or "{" + inline + "}"
+                n = 2
+                while label in picks:  # the same wildcard used twice
+                    label = f"{name or '{' + inline + '}'}#{n}"
+                    n += 1
+                if len(options) == 1:  # a fixed template such as __random__: nothing was picked
+                    value = options[0][0]
+                    return expand(value, depth + 1) if depth < MAX_DEPTH else value
+                fresh = [(o, w) for o, w in options if o != last.get(label)] or options  # not the previous run's pick
+                value = rng.choices([o for o, _ in fresh], [w for _, w in fresh])[0]
+                picks[label] = value
+                return expand(value, depth + 1) if depth < MAX_DEPTH else value
+            return _WILDCARD.sub(one, s)
+
+        result = expand(text, 0)
+        sig = signature()
+        for entry in recent:
+            if entry.get("seed") == seed and entry.get("sig") == sig:
+                return entry["text"], entry["picks"]
+        # never repeat a whole set of picks from the last runs
+        for _ in range(REROLLS):
+            if tuple(sorted(picks.items())) not in seen:
+                break
+            picks.clear()
+            result = expand(text, 0)
+
+        recent.append({"seed": seed, "sig": sig, "text": result, "picks": picks, "time": time.strftime("%Y-%m-%d %H:%M:%S")})
+        _save_json(PICKS_FILE, recent[-RECENT_RUNS:])
+    return result, picks
+
+
+def picks_line(picks):
+    return " | ".join(f"{k}={v}" for k, v in picks.items())
+
+
 # ---------------------------------------------------------------- review pause
 
 class _Pending:
@@ -236,7 +393,14 @@ async def _review_answer(request):
 
 # ---------------------------------------------------------------- nodes
 
-_history = {}  # node_id -> {"context": str, "turns": [(user, assistant), ...]}
+# node_id -> {"context": sha1 of the context, "turns": [[user, assistant], ...]}; kept on disk so it survives restarts
+_history = _load_json(CONVERSATION_FILE, {})
+if not isinstance(_history, dict):
+    _history = {}
+
+
+def _context_key(context):
+    return hashlib.sha1(context.encode("utf-8")).hexdigest()
 
 
 class KoboldCppPrompt:
@@ -246,7 +410,7 @@ class KoboldCppPrompt:
             "required": {
                 "server_url": ("STRING", {"default": DEFAULT_URL, "tooltip": "KoboldCpp address (the one Kobold Lite opens on)."}),
                 "context": ("STRING", {"default": "", "multiline": True, "placeholder": "Guidelines sent with every request (system message). Save/load as .txt below.", "tooltip": "Your standing guidelines. Sent as the system message on every request, since KoboldCpp's API doesn't remember Kobold Lite's Memory."}),
-                "request": ("STRING", {"default": "", "multiline": True, "placeholder": "What you want this time, e.g. rooftop cafe at dusk, laughing", "tooltip": "This run's request (user message)."}),
+                "request": ("STRING", {"default": "", "multiline": True, "placeholder": "What you want this time, e.g. rooftop cafe at dusk, laughing. Wildcards: {red|black|navy} or __setting__", "tooltip": "This run's request (user message). {a|b|c} picks one option and __name__ picks a line from name.txt in ComfyUI/user/prompt_wildcards (or the node's wildcards folder), using the seed and avoiding the last runs' picks."}),
                 "required_phrase": ("STRING", {"default": "", "multiline": True, "placeholder": "Optional: exact text the prompt must contain", "tooltip": "Inserted word for word if the model leaves it out."}),
                 "phrase_position": (["start", "end"], {"default": "start", "tooltip": "Where the required phrase goes when it has to be added."}),
                 "max_tokens": ("INT", {"default": 512, "min": 16, "max": 8192, "tooltip": "Longest reply allowed."}),
@@ -259,8 +423,8 @@ class KoboldCppPrompt:
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("prompt", "model", "raw_reply")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("prompt", "model", "raw_reply", "picks")
     FUNCTION = "generate"
     CATEGORY = "text"
     DESCRIPTION = "Asks a local KoboldCpp server to write an image prompt from your request and standing guidelines."
@@ -269,17 +433,22 @@ class KoboldCppPrompt:
                  clean_output, keep_conversation, history_turns, unique_id=None):
         if not request.strip() and not context.strip():
             raise ValueError("KoboldCpp Prompt: enter a request (and/or a context block).")
+        user_text, picks = expand_wildcards(request.strip(), seed)
+        if picks:
+            user_text = f"{user_text}\n\n{CHOICES_NOTE}"
+
         key = str(unique_id)
+        ctx_key = _context_key(context)
         hist = _history.get(key)
-        if not keep_conversation or hist is None or hist["context"] != context:
-            hist = {"context": context, "turns": []}
+        if not keep_conversation or not isinstance(hist, dict) or hist.get("context") != ctx_key:
+            hist = {"context": ctx_key, "turns": []}
         messages = []
         if context.strip():
             messages.append({"role": "system", "content": context})
         if keep_conversation:
             for user, assistant in hist["turns"][-history_turns:]:
                 messages += [{"role": "user", "content": user}, {"role": "assistant", "content": assistant}]
-        messages.append({"role": "user", "content": request.strip() or "Write the prompt."})
+        messages.append({"role": "user", "content": user_text or "Write the prompt."})
 
         raw, model = chat(server_url, messages, max_tokens, temperature, seed)
         if not model or model.lower() in ("koboldcpp", "gpt-3.5-turbo"):
@@ -290,13 +459,20 @@ class KoboldCppPrompt:
         text = ensure_phrase(text, required_phrase, phrase_position)
 
         if keep_conversation:
-            hist["turns"].append((request.strip(), text))
+            hist["turns"].append([user_text, text])
             hist["turns"] = hist["turns"][-20:]
             _history[key] = hist
+            changed = True
         else:
-            _history.pop(key, None)
+            changed = _history.pop(key, None) is not None
+        if changed:
+            with _file_lock:
+                _save_json(CONVERSATION_FILE, _history)
+        picks_text = picks_line(picks)
+        if picks_text:
+            logging.info(f"[KoboldCpp Prompt] picks: {picks_text}")
         logging.info(f"[KoboldCpp Prompt] {model}: {text[:200]}")
-        return {"ui": {"model": [model], "text": [text]}, "result": (text, model, raw)}
+        return {"ui": {"model": [model], "text": [text], "picks": [picks_text]}, "result": (text, model, raw, picks_text)}
 
 
 class ReviewEditPrompt:

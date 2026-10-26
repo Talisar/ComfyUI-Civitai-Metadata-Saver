@@ -133,19 +133,35 @@ Start KoboldCpp with any text model first (Kobold Lite's default address is `htt
 | --- | --- |
 | `server_url` | KoboldCpp's address. |
 | `context` | Your standing guidelines, sent as the system message on **every** request. KoboldCpp's API doesn't see Kobold Lite's Memory or chat, so put them here. Saved with the workflow. |
-| `request` | What you want this time, e.g. `rooftop cafe at dusk, laughing`. |
+| `request` | What you want this time, e.g. `rooftop cafe at dusk, laughing`. Can contain [wildcards](#wildcards). |
 | `required_phrase` | Optional exact text the prompt must contain. If the model leaves it out, it's inserted word for word at `phrase_position` (`start` / `end`). |
 | `max_tokens`, `temperature` | Generation settings. Reasoning models need a higher `max_tokens`. |
 | `seed` | With the same seed and inputs, ComfyUI reuses the last prompt instead of asking again. Set it to `fixed` to keep a prompt while you change image settings. |
 | `clean_output` | Keep only the prompt: unwraps a ```` ``` ```` code block, drops "Here's your prompt:" lines, `**Prompt:**`-style labels, markdown bold and `<think>` reasoning. |
-| `keep_conversation`, `history_turns` | Also send your last few requests and replies, so follow-ups like `same scene at dawn` work. Cleared when the context changes or ComfyUI restarts. |
+| `keep_conversation`, `history_turns` | Also send your last few requests and replies, so follow-ups like `same scene at dawn` work. Cleared when the context changes. Saved in `koboldcpp_conversation.json` in the node folder, so it survives a restart. |
 
 Under the inputs the node shows:
 
 - **Status line:** the model KoboldCpp has loaded and its context size (green), or an orange warning when KoboldCpp isn't running or has no model loaded. It refreshes when the workflow opens, on every run, when you change `server_url`, and with the ↻ button.
+- **🎲 Random request:** sets the request to `__random__`. Each run then writes a new prompt based only on your guidelines, with the camera angle, expression, lighting, setting, clothing and hair picked for you (see [wildcards](#wildcards)). The full instruction it sends is in `wildcards/random.txt`.
 - **Context files:** pick a saved context and click **Load** to copy it into the `context` box, or **Save…** to write the box to a `.txt` file. Files live in `ComfyUI/user/prompt_contexts/` and can be edited in any text editor. Loading is a one-time copy: later edits in the box stay in the workflow until you save them.
 
-Outputs: `prompt` (cleaned text), `model` (the LLM that wrote it) and `raw_reply` (the unedited reply).
+Outputs: `prompt` (cleaned text), `model` (the LLM that wrote it), `raw_reply` (the unedited reply) and `picks` (what each wildcard became, on one line, e.g. `angle=... | expression=angry | lighting=neon | ...`; empty when the request has no wildcards).
+
+#### Wildcards
+
+LLMs have favourites: ask Gemma for a "random" portrait every run and you keep getting the same lamp light, blouse and library. Wildcards let the node choose the details instead, and the model only writes the prose.
+
+- `{red|black|navy}` picks one option. `2::red` makes an option twice as likely.
+- `__setting__` picks a line from `setting.txt`. In the file, put one option per line. `neon|2` doubles an option's weight, `neon|0.5` halves it and `|0` turns it off. Lines starting with `#` are ignored. Wildcard files can contain wildcards themselves.
+- Starter lists come with the node in its `wildcards` folder: `__angle__`, `__expression__`, `__lighting__`, `__clothing_color__`, `__clothing_type__`, `__hairstyle__` and `__setting__`. To change one, or add your own, put a `.txt` file with the same name in `ComfyUI/user/prompt_wildcards/`. Files there win over the starter files, and updates to the node won't overwrite them.
+- `__random__` (what the 🎲 button puts in) uses all of them. You can also write your own, e.g. `Random portrait. Camera: __angle__. Expression: __expression__. Lighting: __lighting__, setting: __setting__, wearing __clothing_color__ __clothing_type__, hair __hairstyle__.`
+
+When a request has wildcards, the node adds `Use the details above exactly as given; do not substitute other options.` to it.
+
+Picks come from `seed`. A wildcard never gets the same value two runs in a row, and the whole set of picks never repeats one of the last 8 runs. Those runs are kept in `koboldcpp_recent_picks.json` in the node folder, so this works across restarts. Re-running a seed that's still in that list gives back the same picks.
+
+A request without wildcards is sent exactly as typed.
 
 ### Review & Edit Prompt
 
