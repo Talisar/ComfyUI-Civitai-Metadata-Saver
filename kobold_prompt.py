@@ -145,42 +145,20 @@ def list_presets():
         return []
 
 
-# ---------------------------------------------------------------- randomized slots
+# ---------------------------------------------------------------- wildcards
 
-# (input name, label in the request, default options). One option per line; "text|weight" sets a weight.
-SLOTS = [
-    ("angle", "camera angle", [
-        "Eye level, facing the camera directly or turned slightly|3",
-        "Camera slightly above eye level, she looks up into the lens|2",
-        "Camera slightly below eye level, looking up at her face|2",
-        "Three-quarter view or side profile|1",
-    ]),
-    ("expression", "expression", [
-        "neutral and relaxed", "calm", "smirking or playful", "angry", "quiet half-smile", "looking away thoughtfully",
-        "tired or sleepy", "skeptical", "flirtatious", "determined", "laughing|0.5", "crying|0.5",
-    ]),
-    ("lighting", "lighting", [
-        "warm lamp light", "golden hour window light", "night street light", "neon", "backlit", "hard side light",
-        "overcast daylight", "harsh midday sun", "cool bluish light",
-    ]),
-    ("clothing_color", None, ["red", "white", "black", "grey", "navy", "yellow", "burgundy", "denim blue", "cream|0.5"]),
-    ("clothing_type", None, [
-        "t-shirt", "hoodie", "sweater", "button-up shirt", "leather jacket", "denim jacket", "tank top", "turtleneck",
-        "blouse", "workout top",
-    ]),
-    ("hairstyle", "hairstyle", ["loose and long|4", "ponytail", "low bun", "updo", "windblown", "tucked behind one ear", "sleek"]),
-    ("setting", "setting", [
-        "city street", "cafe", "kitchen", "park", "beach", "office", "car interior", "rooftop", "subway platform",
-        "bedroom", "gym", "rainy window", "forest trail", "bar", "bookstore|0.5",
-    ]),
-]
-SLOT_NAMES = [name for name, _, _ in SLOTS]
-COMBO_SLOTS = ("angle", "expression", "lighting", "setting")  # this combination isn't repeated within RECENT_RUNS
+# {red|black|navy} picks one option inline ("2::red" weights it); __setting__ picks a line from setting.txt.
+# Picks use random.Random(seed), never repeat the previous run's value for a wildcard, and avoid the exact same
+# set of picks as any of the last RECENT_RUNS runs. That history is kept on disk, so it survives restarts.
 RECENT_RUNS = 8
-REROLLS = 6
+REROLLS = 12  # tries at a set of picks that isn't one of the last RECENT_RUNS
+MAX_DEPTH = 5  # wildcard files may contain wildcards
 _NODE_DIR = os.path.dirname(os.path.abspath(__file__))
+WILDCARD_DIRS = [os.path.join(folder_paths.get_user_directory(), "prompt_wildcards"), os.path.join(_NODE_DIR, "wildcards")]
 PICKS_FILE = os.path.join(_NODE_DIR, "koboldcpp_recent_picks.json")
 CONVERSATION_FILE = os.path.join(_NODE_DIR, "koboldcpp_conversation.json")
+CHOICES_NOTE = "Use the details above exactly as given; do not substitute other options."
+_WILDCARD = re.compile(r"__([\w\- /]+?)__|\{([^{}]*\|[^{}]*)\}")
 _file_lock = threading.Lock()
 
 
@@ -205,90 +183,118 @@ def _save_json(path, data):
         logging.warning(f"[KoboldCpp Prompt] couldn't write {os.path.basename(path)}: {e}")
 
 
-def parse_options(text):
-    """[(option, weight)] from one-option-per-line text; 'text|2' weights an option, weight 0 turns it off."""
+def _weighted(option, weight, text):
+    try:
+        weight = float(weight)
+    except ValueError:
+        return text, 1.0
+    return option.strip(), weight
+
+
+def parse_lines(text):
+    """[(option, weight)] from a wildcard file: one option per line, 'text|2' weights it, '|0' turns it off."""
     options = []
     for line in (text or "").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        weight = 1.0
-        if "|" in line:
-            head, tail = line.rsplit("|", 1)
-            try:
-                weight, line = float(tail), head.strip()
-            except ValueError:
-                pass
-        if line and weight > 0:
-            options.append((line, weight))
+        option, weight = _weighted(*line.rsplit("|", 1), line) if "|" in line else (line, 1.0)
+        if option and weight > 0:
+            options.append((option, weight))
     return options
 
 
-def _signature(slot_options):
-    return hashlib.sha1(json.dumps(slot_options, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+def parse_inline(body):
+    """[(option, weight)] from the inside of {a|2::b|c}."""
+    options = []
+    for part in body.split("|"):
+        part = part.strip()
+        option, weight = _weighted(*reversed(part.split("::", 1)), part) if "::" in part else (part, 1.0)
+        if option and weight > 0:
+            options.append((option, weight))
+    return options
 
 
-def pick_slots(seed, slot_texts):
-    """Weighted picks per slot from random.Random(seed), avoiding the previous run's values and the
-    angle/expression/lighting/setting combinations of the last RECENT_RUNS runs (kept on disk).
-    Re-running a seed that's still in the recent list gives back exactly the same picks."""
-    slot_options = {name: parse_options(slot_texts.get(name, "")) for name in SLOT_NAMES}
-    slot_options = {k: v for k, v in slot_options.items() if v}
-    if not slot_options:
-        return {}
-    sig = _signature(slot_options)
+def list_wildcards():
+    names = set()
+    for d in WILDCARD_DIRS:
+        for root, _, files in os.walk(d):
+            for f in files:
+                if f.lower().endswith(".txt"):
+                    names.add(os.path.relpath(os.path.join(root, f[:-4]), d).replace(os.sep, "/"))
+    return sorted(names, key=str.lower)
+
+
+def _read_wildcard(name):
+    for d in WILDCARD_DIRS:  # the user folder wins over the starter files shipped with the node
+        path = os.path.normpath(os.path.join(d, name.strip() + ".txt"))
+        if path.startswith(os.path.normpath(d) + os.sep) and os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+    available = ", ".join(f"__{n}__" for n in list_wildcards()) or "none"
+    raise ValueError(f"KoboldCpp Prompt: no wildcard file for __{name}__. Add {name}.txt to {WILDCARD_DIRS[0]} (available: {available}).")
+
+
+def expand_wildcards(text, seed):
+    """(text with every wildcard replaced, {label: pick}). Text without wildcards comes back unchanged."""
+    if not _WILDCARD.search(text):
+        return text, {}
     with _file_lock:
         recent = _load_json(PICKS_FILE, [])
         if not isinstance(recent, list):
             recent = []
-        for entry in recent:
-            if entry.get("seed") == seed and entry.get("options") == sig:
-                return entry["picks"]
+        files = {}
+
+        def lookup(name):
+            if name not in files:
+                files[name] = _read_wildcard(name)
+            return files[name]
+
+        # what the result depends on, so a seed that's re-run with the same request/lists gives the same picks
+        def signature():
+            return hashlib.sha1(json.dumps([text, files], sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
         rng = random.Random(seed)
-        draw = lambda name: rng.choices([o for o, _ in slot_options[name]], [w for _, w in slot_options[name]])[0]
         last = recent[-1]["picks"] if recent else {}
-        combos = {tuple(e["picks"].get(k) for k in COMBO_SLOTS) for e in recent[-RECENT_RUNS:]}
+        seen = {tuple(sorted(e["picks"].items())) for e in recent[-RECENT_RUNS:]}
+        picks = {}
 
-        def roll(name):
-            value = draw(name)
-            for _ in range(REROLLS):
-                if value != last.get(name) or len({o for o, _ in slot_options[name]}) < 2:
-                    break
-                value = draw(name)
-            return value
+        def expand(s, depth):
+            def one(m):
+                name, inline = m.group(1), m.group(2)
+                options = parse_lines(lookup(name)) if name else parse_inline(inline)
+                if not options:
+                    return ""
+                label = name or "{" + inline + "}"
+                n = 2
+                while label in picks:  # the same wildcard used twice
+                    label = f"{name or '{' + inline + '}'}#{n}"
+                    n += 1
+                fresh = [(o, w) for o, w in options if o != last.get(label)] or options  # not the previous run's pick
+                value = rng.choices([o for o, _ in fresh], [w for _, w in fresh])[0]
+                picks[label] = value
+                return expand(value, depth + 1) if depth < MAX_DEPTH else value
+            return _WILDCARD.sub(one, s)
 
-        picks = {name: roll(name) for name in slot_options}
-        combo_slots = [k for k in COMBO_SLOTS if k in picks]
-        for _ in range(REROLLS * 2):
-            if not combo_slots or tuple(picks.get(k) for k in COMBO_SLOTS) not in combos:
+        result = expand(text, 0)
+        sig = signature()
+        for entry in recent:
+            if entry.get("seed") == seed and entry.get("sig") == sig:
+                return entry["text"], entry["picks"]
+        # never repeat a whole set of picks from the last runs
+        for _ in range(REROLLS):
+            if tuple(sorted(picks.items())) not in seen:
                 break
-            name = rng.choice(combo_slots)
-            picks[name] = roll(name)
+            picks.clear()
+            result = expand(text, 0)
 
-        recent.append({"seed": seed, "options": sig, "picks": picks, "time": time.strftime("%Y-%m-%d %H:%M:%S")})
+        recent.append({"seed": seed, "sig": sig, "text": result, "picks": picks, "time": time.strftime("%Y-%m-%d %H:%M:%S")})
         _save_json(PICKS_FILE, recent[-RECENT_RUNS:])
-    return picks
-
-
-def choices_sentence(picks):
-    parts = []
-    for name, label, _ in SLOTS:
-        if name == "clothing_type":
-            continue
-        if name == "clothing_color":
-            clothing = " ".join(picks[k] for k in ("clothing_color", "clothing_type") if k in picks)
-            if clothing:
-                parts.append(f"clothing: {clothing}")
-        elif name in picks:
-            parts.append(f"{label}: {picks[name]}")
-    if not parts:
-        return ""
-    return f"Use exactly these choices: {'; '.join(parts)}. Do not substitute other options."
+    return result, picks
 
 
 def picks_line(picks):
-    return " | ".join(f"{name}={picks[name]}" for name in SLOT_NAMES if name in picks)
+    return " | ".join(f"{k}={v}" for k, v in picks.items())
 
 
 # ---------------------------------------------------------------- review pause
@@ -401,7 +407,7 @@ class KoboldCppPrompt:
             "required": {
                 "server_url": ("STRING", {"default": DEFAULT_URL, "tooltip": "KoboldCpp address (the one Kobold Lite opens on)."}),
                 "context": ("STRING", {"default": "", "multiline": True, "placeholder": "Guidelines sent with every request (system message). Save/load as .txt below.", "tooltip": "Your standing guidelines. Sent as the system message on every request, since KoboldCpp's API doesn't remember Kobold Lite's Memory."}),
-                "request": ("STRING", {"default": "", "multiline": True, "placeholder": "What you want this time, e.g. rooftop cafe at dusk, laughing", "tooltip": "This run's request (user message)."}),
+                "request": ("STRING", {"default": "", "multiline": True, "placeholder": "What you want this time, e.g. rooftop cafe at dusk, laughing. Wildcards: {red|black|navy} or __setting__", "tooltip": "This run's request (user message). {a|b|c} picks one option and __name__ picks a line from name.txt in ComfyUI/user/prompt_wildcards (or the node's wildcards folder), using the seed and avoiding the last runs' picks."}),
                 "required_phrase": ("STRING", {"default": "", "multiline": True, "placeholder": "Optional: exact text the prompt must contain", "tooltip": "Inserted word for word if the model leaves it out."}),
                 "phrase_position": (["start", "end"], {"default": "start", "tooltip": "Where the required phrase goes when it has to be added."}),
                 "max_tokens": ("INT", {"default": 512, "min": 16, "max": 8192, "tooltip": "Longest reply allowed."}),
@@ -410,13 +416,6 @@ class KoboldCppPrompt:
                 "clean_output": ("BOOLEAN", {"default": True, "tooltip": "Keep only the prompt: unwrap code blocks, drop 'Here's your prompt:' lines and <think> reasoning."}),
                 "keep_conversation": ("BOOLEAN", {"default": False, "tooltip": "Send recent requests/replies too, so follow-ups like 'same scene at dawn' work. Cleared when the context changes."}),
                 "history_turns": ("INT", {"default": 3, "min": 1, "max": 20, "tooltip": "How many earlier request/reply pairs to include when keep_conversation is on."}),
-            },
-            # optional, after the old inputs, so saved workflows keep their widget order
-            "optional": {
-                "randomize_slots": ("BOOLEAN", {"default": True, "tooltip": "Pick an angle, expression, lighting, clothing, hairstyle and setting from the lists below (using the seed) and tell the model to use exactly those. Avoids repeating the last runs, even after a restart."}),
-                **{name: ("STRING", {"default": "\n".join(default), "multiline": True,
-                                     "tooltip": f"{name.replace('_', ' ').capitalize()} options, one per line. Add |weight to make one more or less likely, e.g. 'neon|2' or 'neon|0.5'. Empty = leave this slot to the model."})
-                   for name, _, default in SLOTS},
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -428,15 +427,12 @@ class KoboldCppPrompt:
     DESCRIPTION = "Asks a local KoboldCpp server to write an image prompt from your request and standing guidelines."
 
     def generate(self, server_url, context, request, required_phrase, phrase_position, max_tokens, temperature, seed,
-                 clean_output, keep_conversation, history_turns, unique_id=None, randomize_slots=False, **slot_texts):
+                 clean_output, keep_conversation, history_turns, unique_id=None):
         if not request.strip() and not context.strip():
             raise ValueError("KoboldCpp Prompt: enter a request (and/or a context block).")
-        # randomize_slots defaults to off here so an API-format prompt saved before it existed runs as before
-        picks = pick_slots(seed, {n: slot_texts.get(n, "\n".join(d)) for n, _, d in SLOTS}) if randomize_slots else {}
-        user_text = request.strip()
-        sentence = choices_sentence(picks)
-        if sentence:
-            user_text = f"{user_text}\n\n{sentence}" if user_text else sentence
+        user_text, picks = expand_wildcards(request.strip(), seed)
+        if picks:
+            user_text = f"{user_text}\n\n{CHOICES_NOTE}"
 
         key = str(unique_id)
         ctx_key = _context_key(context)

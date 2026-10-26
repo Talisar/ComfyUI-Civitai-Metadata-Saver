@@ -1,0 +1,10 @@
+t-shirt
+hoodie
+sweater
+button-up shirt
+leather jacket
+denim jacket
+tank top
+turtleneck
+blouse
+workout top

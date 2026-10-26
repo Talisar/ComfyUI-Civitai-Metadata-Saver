@@ -1,0 +1,9 @@
+red
+white
+black
+grey
+navy
+yellow
+burgundy
+denim blue
+cream|0.5

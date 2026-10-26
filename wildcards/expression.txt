@@ -1,0 +1,12 @@
+neutral and relaxed
+calm
+smirking or playful
+angry
+quiet half-smile
+looking away thoughtfully
+tired or sleepy
+skeptical
+flirtatious
+determined
+laughing|0.5
+crying|0.5

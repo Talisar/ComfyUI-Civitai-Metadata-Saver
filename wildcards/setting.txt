@@ -1,0 +1,15 @@
+city street
+cafe
+kitchen
+park
+beach
+office
+car interior
+rooftop
+subway platform
+bedroom
+gym
+rainy window
+forest trail
+bar
+bookstore|0.5
