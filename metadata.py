@@ -89,6 +89,18 @@ class Runtime:
         return self.samples.get((self.prompt_id, str(node_id)))
 
 
+def pixaroma_loras(state):
+    """[(name, model_strength)] for the switched-on rows of a LoRA Loader Pixaroma state."""
+    try:
+        obj = json.loads(state) if isinstance(state, str) else state
+        rows = obj.get("loras") or []
+    except (ValueError, AttributeError):
+        return []
+    return [(e["name"], e.get("sm", e.get("strength", 1.0))) for e in rows
+            if isinstance(e, dict) and isinstance(e.get("name"), str) and e.get("on", True)
+            and not e["name"].startswith("(")]
+
+
 class GraphReader:
     def __init__(self, prompt, runtime=None):
         self.prompt = {str(k): v for k, v in (prompt or {}).items()}
@@ -312,6 +324,8 @@ class GraphReader:
                 name = r(ins["lora_name"])
                 strength = r(ins.get("strength_model", ins.get("strength", 1.0)))
                 node_loras.append((name, strength))
+            if "LoraLoaderState" in ins:  # LoRA Loader Pixaroma keeps its rows in a JSON blob
+                node_loras += pixaroma_loras(r(ins["LoraLoaderState"]))
             for k, v in ins.items():
                 if isinstance(v, dict) and "lora" in v and v.get("on", True):
                     node_loras.append((v.get("lora"), v.get("strength", 1.0)))

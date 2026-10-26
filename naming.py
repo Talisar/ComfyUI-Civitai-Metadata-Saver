@@ -68,8 +68,13 @@ def build_name(prefix, keys, delimiter, prompt, info, timestamp=None):
         subfolder = key.startswith("./") and "/" not in key[2:]
         if subfolder:
             key = key[2:]
-        if "%" in key:
-            value = timestamp.strftime(key)
+        if key.startswith("%") and _info_value(key[1:], info) is not None:
+            value = _info_value(key[1:], info)  # "%lora" means "lora", not a date code
+        elif "%" in key:
+            try:
+                value = timestamp.strftime(key)
+            except ValueError:  # Windows rejects unknown codes; keep the text instead
+                value = key.replace("%", "")
         elif "/" in key:
             value = key
         else:
