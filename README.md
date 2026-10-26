@@ -38,7 +38,7 @@ Most older "A1111 format" savers only work when a KSampler is wired straight to 
 
 - prompts built from switches, string concatenation, primitives and preview nodes
 - prompts written at runtime by LLM prompt-expander nodes (TextGenerate, Ollama, Gemini, ...)
-- rgthree **Power Lora Loader**, standard LoRA loaders, Efficiency-style LoRA stacks
+- rgthree **Power Lora Loader**, **LoRA Loader Pixaroma**, standard LoRA loaders, Efficiency-style LoRA stacks
 - rgthree Seed and other seed/primitive nodes
 - images passed through preview/bridge nodes before saving
 - `KSampler`, `KSamplerAdvanced`, `SamplerCustom`, `SamplerCustomAdvanced` (Flux guidance included)
@@ -87,7 +87,7 @@ The filename and folder name are each built from the prefix followed by keys, jo
 | `widget_name` | Widget value from the last node that has it |
 | `./key` | A subfolder named by the key's value, e.g. `./lora`, `./%F` |
 | `sub/` or `a/b` | Literal subfolder |
-| anything else | Used literally |
+| anything else | Used literally (an unknown `%` code no longer crashes the save) |
 
 **Examples**
 
