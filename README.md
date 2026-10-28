@@ -46,6 +46,7 @@ Most older "A1111 format" savers only work when a KSampler is wired straight to 
 - images passed through preview/bridge nodes before saving
 - `KSampler`, `KSamplerAdvanced`, `SamplerCustom`, `SamplerCustomAdvanced` (Flux guidance included)
 - several samplers and save nodes in one workflow (each save node reports the branch that made its image)
+- list runs (e.g. a list of prompts from a list loader): each image gets the prompt and seed of its own list item
 
 The ComfyUI workflow is still embedded in PNGs, so saved images drag back into ComfyUI as usual.
 

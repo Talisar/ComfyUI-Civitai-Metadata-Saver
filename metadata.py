@@ -76,17 +76,30 @@ def is_link(v):
 class Runtime:
     """Values recorded while the prompt actually executed (see hooks.py)."""
 
-    def __init__(self, prompt_id=None, texts=None, samples=None):
+    def __init__(self, prompt_id=None, texts=None, samples=None, list_index=None):
         self.prompt_id = prompt_id
-        self.texts = texts or {}      # (prompt_id, node_id) -> [str, ...]
-        self.samples = samples or {}  # (prompt_id, node_id) -> {seed, steps, ...}
+        self.list_index = list_index or 0  # which item of a list run the save node is on
+        self.texts = texts or {}      # (prompt_id, node_id, list_index) -> [str, ...]
+        self.samples = samples or {}  # (prompt_id, node_id, list_index) -> {seed, steps, ...}
+
+    def _get(self, store, node_id):
+        """Value for this list item; like ComfyUI, a shorter list repeats its last item."""
+        node_id = str(node_id)
+        found = store.get((self.prompt_id, node_id, self.list_index))
+        if found is not None:
+            return found
+        indexes = [k[2] for k in store if k[0] == self.prompt_id and k[1] == node_id]
+        below = [i for i in indexes if i <= self.list_index]
+        if not indexes:
+            return None
+        return store[(self.prompt_id, node_id, max(below) if below else min(indexes))]
 
     def text(self, node_id):
-        found = self.texts.get((self.prompt_id, str(node_id)))
+        found = self._get(self.texts, node_id)
         return max(found, key=len) if found else None
 
     def sample(self, node_id):
-        return self.samples.get((self.prompt_id, str(node_id)))
+        return self._get(self.samples, node_id)
 
 
 def pixaroma_loras(state):
