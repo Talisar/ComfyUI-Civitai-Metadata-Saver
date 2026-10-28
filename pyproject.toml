@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-talisar-pack"
-description = "Talisar's ComfyUI node pack. Save Image (Civitai Metadata): writes A1111-style metadata (prompts, seed, sampler, model and LoRA hashes) that Civitai reads automatically. Traces complex graphs, LLM prompt expanders and rgthree Power Lora Loader. KoboldCpp Prompt: generates prompts with a local LLM. Review & Edit Prompt: pauses the run to review/edit a prompt."
-version = "1.2.0"
+description = "Talisar's ComfyUI node pack. Save Image (Civitai Metadata): writes A1111-style metadata (prompts, seed, sampler, model and LoRA hashes) that Civitai reads automatically. Traces complex graphs, LLM prompt expanders and rgthree Power Lora Loader. KoboldCpp Prompt: generates prompts with a local LLM. Review & Edit Prompt: pauses the run to review/edit a prompt. Load Text/Image by Index: loads one file from a folder per run."
+version = "1.3.0"
 license = { file = "LICENSE" }
 dependencies = []
 
