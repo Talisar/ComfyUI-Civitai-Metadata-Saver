@@ -204,7 +204,7 @@ To resume after a restart, set `index` to the next file number and queue the rem
 | Node | Outputs |
 | --- | --- |
 | Load Text by Index | `text` (UTF-8, BOM removed), `filename` (without `.txt`), `index` (the one used), `total` (number of `.txt` files) |
-| Load Image by Index | `image`, `mask` (from the alpha channel, else all ones), `filename` (without extension), `caption` (the matching `<filename>.txt` if there is one, else empty), `index`, `total` |
+| Load Image by Index | `image`, `mask` (like core Load Image: 1 where transparent, all zeros without alpha), `filename` (without extension), `caption` (the matching `<filename>.txt` if there is one, else empty), `index`, `total` |
 
 Images get their EXIF orientation applied and are converted to RGB. Each run prints a line such as `[LoadTextByIndex] 37/150: 037.txt` to the console.
 

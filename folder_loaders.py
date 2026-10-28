@@ -155,10 +155,11 @@ class LoadImageByIndex:
             rgb = img.convert("RGB")
 
         image = torch.from_numpy(np.array(rgb).astype(np.float32) / 255.0)[None,]
+        # Same convention as core Load Image: 1 where the image is transparent.
         if alpha is not None:
-            mask = torch.from_numpy(np.array(alpha).astype(np.float32) / 255.0)[None,]
+            mask = 1.0 - torch.from_numpy(np.array(alpha).astype(np.float32) / 255.0)[None,]
         else:
-            mask = torch.ones((1, rgb.height, rgb.width), dtype=torch.float32)
+            mask = torch.zeros((1, rgb.height, rgb.width), dtype=torch.float32)
 
         caption_path = os.path.join(os.path.dirname(path), stem + ".txt")
         caption = read_text(caption_path) if os.path.isfile(caption_path) else ""
