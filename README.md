@@ -184,7 +184,7 @@ List loaders (e.g. *Load Texts from Folder Pixaroma*) send every file at once, a
 ### Usage
 
 1. Add **Load Text by Index (from folder)** or **Load Image by Index (from folder)** and point `folder` at your files.
-2. Set `index` to the first file (1) and its *control after generate* to **increment**.
+2. Set `index` to the first file (1). Its *control after generate* must be **increment** (new nodes start on it; nodes added before this change may still say *randomize*).
 3. Set ComfyUI's **Run** count to the number of files (the `total` output tells you) and queue.
 
 To resume after a restart, set `index` to the next file number and queue the remaining runs.
