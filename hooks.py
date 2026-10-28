@@ -3,7 +3,9 @@
 Static graph reading can't know text produced at runtime (LLM prompt expanders,
 wildcards, random seeds resolved in Python). Wrapping CLIP.tokenize and
 comfy.sample.sample/sample_custom lets us capture the values that were actually
-used, keyed by (prompt_id, node_id) of the node that was executing.
+used, keyed by (prompt_id, node_id, list_index) of the node that was executing.
+list_index tells apart the items of a list run (e.g. a list of prompts), where
+ComfyUI calls each node once per item within one prompt.
 """
 
 import functools
@@ -12,8 +14,8 @@ from collections import OrderedDict
 
 MAX_PROMPTS = 32
 
-texts = {}    # (prompt_id, node_id) -> [str, ...]
-samples = {}  # (prompt_id, node_id) -> dict
+texts = {}    # (prompt_id, node_id, list_index) -> [str, ...]
+samples = {}  # (prompt_id, node_id, list_index) -> dict
 _prompt_order = OrderedDict()
 
 
@@ -25,7 +27,7 @@ def _context():
         return None
     if ctx is None or ctx.node_id is None:
         return None
-    return str(ctx.prompt_id), str(ctx.node_id)
+    return str(ctx.prompt_id), str(ctx.node_id), getattr(ctx, "list_index", None) or 0
 
 
 def _touch(prompt_id):

@@ -106,14 +106,16 @@ class SaveImageCivitai:
         try:
             node = (prompt or {}).get(str(unique_id), {})
             image_link = node.get("inputs", {}).get("images")
-            ctx_prompt_id = None
+            ctx_prompt_id, list_index = None, 0
             try:
                 from comfy_execution.utils import get_executing_context
                 ctx = get_executing_context()
-                ctx_prompt_id = str(ctx.prompt_id) if ctx else None
+                if ctx:
+                    ctx_prompt_id = str(ctx.prompt_id)
+                    list_index = getattr(ctx, "list_index", None) or 0
             except Exception:
                 pass
-            info = extract(prompt, image_link, Runtime(ctx_prompt_id, hooks.texts, hooks.samples))
+            info = extract(prompt, image_link, Runtime(ctx_prompt_id, hooks.texts, hooks.samples, list_index))
         except Exception:
             logging.exception("[Civitai Metadata] failed to read workflow graph")
 
