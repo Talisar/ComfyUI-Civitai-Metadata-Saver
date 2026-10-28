@@ -60,7 +60,8 @@ def pick_file(folder, extensions, index, sort, at_end, kind):
         raise FileNotFoundError(f"No {kind} files in {path}")
     if index > total:
         if at_end == "stop":
-            raise IndexError(f"index {index} > {total} files, batch finished")
+            hint = " (the index control looks set to randomize; set it to increment)" if index > 1_000_000 else ""
+            raise IndexError(f"index {index} > {total} files, batch finished{hint}")
         index = (index - 1) % total + 1
     return files[index - 1], index, total
 
@@ -92,7 +93,7 @@ def read_text(path):
 def _common_inputs():
     return {
         "folder": ("STRING", {"default": "", "tooltip": "Empty: ComfyUI's output folder. A name: a folder inside output. Or a full path. Subfolders are skipped."}),
-        "index": ("INT", {"default": 1, "min": 1, "max": 0xFFFFFFFF, "control_after_generate": True, "tooltip": "Which file to load (1 = first). Set to 'increment' and set Run count to the number of files to go through the folder one file per run."}),
+        "index": ("INT", {"default": 1, "min": 1, "max": 0xFFFFFFFF, "control_after_generate": True, "tooltip": "Which file to load (1 = first). New nodes start on increment: set Run count to the number of files to go through the folder one file per run. Do not use randomize."}),
         "sort": (SORT_MODES, {"default": "natural name", "tooltip": "'natural name' puts 2.txt before 10.txt. 'modified date' is oldest first."}),
         "at_end": (AT_END_MODES, {"default": "stop", "tooltip": "'stop': an index past the last file raises 'batch finished', so extra queued runs fail fast. 'wrap': start over at the first file."}),
     }
