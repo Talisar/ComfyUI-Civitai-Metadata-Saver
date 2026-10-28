@@ -7,6 +7,8 @@ A small collection of ComfyUI custom nodes:
 | [Save Image (Civitai Metadata)](#save-image-civitai-metadata) | `image` | Saves images with A1111-style metadata (prompts, seed, sampler, model and LoRA hashes) that Civitai reads automatically. |
 | [KoboldCpp Prompt](#koboldcpp-prompt) | `text` | Writes a prompt with a local LLM running in KoboldCpp, using your saved context/guidelines. |
 | [Review & Edit Prompt](#review--edit-prompt) | `text` | Pauses the run so you can read and edit a prompt before it's used. |
+| [Load Text by Index](#load-text--image-by-index-one-per-run) | `text` | Loads one `.txt` prompt from a folder per run, so big prompt batches don't pile up in RAM. |
+| [Load Image by Index](#load-text--image-by-index-one-per-run) | `image` | Loads one image (plus its `.txt` caption) from a folder per run, for upscale / img2img passes. |
 
 More nodes will be added over time. No extra Python packages are needed.
 
@@ -174,6 +176,37 @@ Pauses the run and opens an editor with the incoming text. Edit it, then click *
 | `off` | Passes the text straight through. |
 
 The Civitai saver records the final, edited prompt that reaches the text encoder.
+
+## Load Text / Image by Index (one per run)
+
+List loaders (e.g. *Load Texts from Folder Pixaroma*) send every file at once, and ComfyUI then runs each node over the whole list before moving on. Every intermediate image stays in RAM and nothing saves until the end. These nodes load **one file per queued run** instead, so each run goes through the whole workflow (generate, save, upscale, save) and frees its memory before the next one starts.
+
+### Usage
+
+1. Add **Load Text by Index (from folder)** or **Load Image by Index (from folder)** and point `folder` at your files.
+2. Set `index` to the first file (1) and its *control after generate* to **increment**.
+3. Set ComfyUI's **Run** count to the number of files (the `total` output tells you) and queue.
+
+To resume after a restart, set `index` to the next file number and queue the remaining runs.
+
+#### Inputs
+
+| Input | Description |
+| --- | --- |
+| `folder` | Empty: ComfyUI's output folder. A name: a folder inside output. Or a full path. Only files directly in the folder are used; subfolders (`_archive`, `_used`, ...) are skipped. |
+| `index` | Which file to load, starting at 1. |
+| `sort` | `natural name` (`2.txt` before `10.txt`), `name`, or `modified date` (oldest first). |
+| `at_end` | `stop`: an index past the last file errors with `index 151 > 150 files, batch finished`, so extra queued runs fail fast. `wrap`: starts over at the first file. |
+| `extensions` | Image node only. Default `png,jpg,jpeg,webp`. |
+
+#### Outputs
+
+| Node | Outputs |
+| --- | --- |
+| Load Text by Index | `text` (UTF-8, BOM removed), `filename` (without `.txt`), `index` (the one used), `total` (number of `.txt` files) |
+| Load Image by Index | `image`, `mask` (like core Load Image: 1 where transparent, all zeros without alpha), `filename` (without extension), `caption` (the matching `<filename>.txt` if there is one, else empty), `index`, `total` |
+
+Images get their EXIF orientation applied and are converted to RGB. Each run prints a line such as `[LoadTextByIndex] 37/150: 037.txt` to the console.
 
 ## Troubleshooting
 
