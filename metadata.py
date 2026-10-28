@@ -453,3 +453,87 @@ def build_parameters(info, width, height, model_hash=None, lora_hashes=None, lor
 
     lines.append(", ".join(fields))
     return "\n".join(lines)
+
+
+# A1111 field, e.g. 'Steps: 20' or 'Hashes: {"model": "abc"}' or 'Lora hashes: "a: 1, b: 2"'.
+_FIELD_RE = re.compile(r'\s*([\w][\w \-/()+.]*?):\s*("(?:\\.|[^"\\])*"|\{.*?\}(?=\s*(?:,|$))|[^,]*)\s*(?:,|$)')
+_SIZE_RE = re.compile(r"(^|,\s*)Size:\s*(\d+)x(\d+)")
+
+# A1111 field -> info key, for filename keys when the metadata comes from a source image.
+_SOURCE_FIELDS = {"Seed": "seed", "Steps": "steps", "CFG scale": "cfg", "Sampler": "sampler_name",
+                  "Schedule type": "scheduler", "Denoising strength": "denoise", "Model": "model"}
+
+
+def _fields_line(lines):
+    """Index of the 'Steps: ..., Size: ...' line (the last line with a Size field), or None."""
+    for i in range(len(lines) - 1, -1, -1):
+        if _SIZE_RE.search(lines[i]):
+            return i
+    return None
+
+
+def parse_source_fields(text):
+    """Pull seed/steps/cfg/... out of an existing A1111 parameters string."""
+    lines = (text or "").split("\n")
+    i = _fields_line(lines)
+    if i is None:
+        return {}
+    info = {}
+    for key, value in _FIELD_RE.findall(lines[i]):
+        name = _SOURCE_FIELDS.get(key.strip())
+        if not name or not value:
+            continue
+        if value.startswith('"'):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                value = value.strip('"')
+        for cast in (int, float):
+            try:
+                value = cast(value)
+                break
+            except (TypeError, ValueError):
+                pass
+        info[name] = value
+    return info
+
+
+def rescale_parameters(text, width, height, extra=""):
+    """Reuse a source image's parameters for an upscaled copy.
+
+    Size becomes the new size; if it is bigger than the source, 'Hires upscale: <factor>'
+    is added (multiplied into an existing one). Extra fields go before 'Version:'.
+    """
+    lines = text.strip("\n").split("\n")
+    i = _fields_line(lines)
+    if i is None:
+        lines.append(f"Size: {width}x{height}")
+        i = len(lines) - 1
+    line = lines[i]
+    m = _SIZE_RE.search(line)
+    old_w = int(m.group(2))
+    line = line[:m.start()] + f"{m.group(1)}Size: {width}x{height}" + line[m.end():]
+
+    factor = width / old_w if old_w else 1.0
+    if factor > 1.005:
+        hires = re.search(r"(^|,\s*)Hires upscale:\s*([\d.]+)", line)
+        if hires:
+            try:
+                factor *= float(hires.group(2))
+            except ValueError:
+                pass
+            line = line[:hires.start()] + f"{hires.group(1)}Hires upscale: {round(factor, 2):g}" + line[hires.end():]
+        else:
+            size_end = _SIZE_RE.search(line).end()
+            line = line[:size_end] + f", Hires upscale: {round(factor, 2):g}" + line[size_end:]
+
+    extra = (extra or "").strip().strip(",").strip()
+    if extra and extra not in line:
+        version = re.search(r",\s*Version:", line)
+        if version:
+            line = line[:version.start()] + f", {extra}" + line[version.start():]
+        else:
+            line = f"{line}, {extra}"
+
+    lines[i] = line
+    return "\n".join(lines)

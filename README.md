@@ -9,6 +9,7 @@ A small collection of ComfyUI custom nodes:
 | [Review & Edit Prompt](#review--edit-prompt) | `text` | Pauses the run so you can read and edit a prompt before it's used. |
 | [Load Text by Index](#load-text--image-by-index-one-per-run) | `text` | Loads one `.txt` prompt from a folder per run, so big prompt batches don't pile up in RAM. |
 | [Load Image by Index](#load-text--image-by-index-one-per-run) | `image` | Loads one image (plus its `.txt` caption) from a folder per run, for upscale / img2img passes. |
+| [Load Image (with Parameters)](#upscale-only-runs-keep-the-original-metadata) | `image` | Core Load Image (drag & drop) plus a `parameters` output with the image's A1111 generation data. |
 
 More nodes will be added over time. No extra Python packages are needed.
 
@@ -74,6 +75,7 @@ The `parameters` output contains the exact text written to the image. Connect it
 | `hash_models` | Compute model/LoRA hashes so Civitai can link resources. |
 | `positive_override` / `negative_override` | Optional: use this text instead of the traced prompt. |
 | `extra_parameters` | Optional extra A1111 fields appended verbatim, e.g. `Shift: 4`. |
+| `source_parameters` | Optional: generation data read from the source image (see [Upscale-only runs](#upscale-only-runs-keep-the-original-metadata)). When not empty it is reused instead of tracing the workflow. |
 
 #### Naming keys
 
@@ -204,9 +206,24 @@ To resume after a restart, set `index` to the next file number and queue the rem
 | Node | Outputs |
 | --- | --- |
 | Load Text by Index | `text` (UTF-8, BOM removed), `filename` (without `.txt`), `index` (the one used), `total` (number of `.txt` files) |
-| Load Image by Index | `image`, `mask` (like core Load Image: 1 where transparent, all zeros without alpha), `filename` (without extension), `caption` (the matching `<filename>.txt` if there is one, else empty), `index`, `total` |
+| Load Image by Index | `image`, `mask` (like core Load Image: 1 where transparent, all zeros without alpha), `filename` (without extension), `caption` (the matching `<filename>.txt` if there is one, else empty), `index`, `total`, `parameters` (the image's A1111 generation data, empty if it has none) |
 
 Images get their EXIF orientation applied and are converted to RGB. Each run prints a line such as `[LoadTextByIndex] 37/150: 037.txt` to the console.
+
+## Upscale-only runs: keep the original metadata
+
+A workflow that only loads an image and upscales it has no sampler, so Save Image (Civitai Metadata) has nothing to trace and the original prompt, seed, model and LoRAs would be lost. To carry them over:
+
+1. Load the images with **Load Image by Index (from folder)** (a whole folder, one per run) or **Load Image (with Parameters)** (one image, drag & drop like core Load Image).
+2. Wire its `parameters` output into the save node's `source_parameters` input.
+
+The saved image keeps the original text as-is (prompt, seed, sampler, model + LoRA hashes), with these changes:
+
+- `Size` is set to the size actually saved.
+- If the image is bigger than the original, `Hires upscale: <factor>` is added (e.g. `2`, rounded to 2 decimals). With a downscale back to the input size, no tag is added.
+- `extra_parameters` is added before `Version`.
+
+`lora_tags_in_prompt` and `hash_models` don't apply in this mode (the tags and hashes come from the original). Filename keys such as `seed`, `steps`, `cfg` and `model` are read from the carried-over text. The `parameters` chunk is read from PNGs, and from EXIF UserComment in JPG/WebP (what this node and A1111 write). Images without it give an empty string, and the save node then traces the workflow as usual.
 
 ## Troubleshooting
 

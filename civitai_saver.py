@@ -12,7 +12,7 @@ import folder_paths
 from comfy.cli_args import args
 
 from . import hooks, naming
-from .metadata import Runtime, build_parameters, extract
+from .metadata import Runtime, build_parameters, extract, parse_source_fields, rescale_parameters
 
 HASH_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hash_cache.json")
 _hash_lock = threading.Lock()
@@ -89,6 +89,7 @@ class SaveImageCivitai:
                 "positive_override": ("STRING", {"forceInput": True, "tooltip": "Use this text as the positive prompt instead of the one traced from the graph."}),
                 "negative_override": ("STRING", {"forceInput": True}),
                 "extra_parameters": ("STRING", {"default": "", "multiline": False, "tooltip": "Extra A1111 fields appended verbatim, e.g. 'Shift: 4'."}),
+                "source_parameters": ("STRING", {"forceInput": True, "tooltip": "Parameters read from the source image (Load Image by Index 'parameters' output). When not empty, they are reused as-is instead of tracing this workflow; Size is updated and 'Hires upscale' added if the image was resized."}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"},
         }
@@ -139,9 +140,15 @@ class SaveImageCivitai:
                     delimiter="_", counter_digits=4, counter_position="last", one_counter_per_folder=True,
                     file_format="png", quality=95, embed_workflow=True,
                     lora_tags_in_prompt=True, hash_models=True, positive_override=None, negative_override=None,
-                    extra_parameters="", prompt=None, extra_pnginfo=None, unique_id=None):
-        info = self.trace(positive_override, negative_override, prompt, unique_id)
-        parameters = self.build(images, info, lora_tags_in_prompt, hash_models, extra_parameters)
+                    extra_parameters="", source_parameters=None, prompt=None, extra_pnginfo=None, unique_id=None):
+        if source_parameters and source_parameters.strip():
+            # Upscale-only workflow: no sampler here, so carry the original generation's data over.
+            info = parse_source_fields(source_parameters)
+            h, w = images.shape[1], images.shape[2]
+            parameters = rescale_parameters(source_parameters, w, h, extra_parameters)
+        else:
+            info = self.trace(positive_override, negative_override, prompt, unique_id)
+            parameters = self.build(images, info, lora_tags_in_prompt, hash_models, extra_parameters)
 
         ext = f".{file_format}"
         folder, stem = naming.resolve_paths(self.output_dir, filename_prefix, filename_keys, foldername_prefix,
