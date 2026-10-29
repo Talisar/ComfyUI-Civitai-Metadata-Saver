@@ -10,6 +10,7 @@ A small collection of ComfyUI custom nodes:
 | [Load Text by Index](#load-text--image-by-index-one-per-run) | `text` | Loads one `.txt` prompt from a folder per run, so big prompt batches don't pile up in RAM. |
 | [Load Image by Index](#load-text--image-by-index-one-per-run) | `image` | Loads one image (plus its `.txt` caption) from a folder per run, for upscale / img2img passes. |
 | [Load Image (with Parameters)](#upscale-only-runs-keep-the-original-metadata) | `image` | Core Load Image (drag & drop) plus a `parameters` output with the image's A1111 generation data. |
+| [Image Filename (from loader)](#image-filename-from-loader) | `image` | Outputs the source filename of an image from any load-image node, e.g. for the save node's `filename_prefix`. |
 
 More nodes will be added over time. No extra Python packages are needed.
 
@@ -225,6 +226,18 @@ The saved image keeps the original text as-is (prompt, seed, sampler, model + Lo
 - `extra_parameters` is added before `Version`.
 
 `lora_tags_in_prompt` and `hash_models` don't apply in this mode (the tags and hashes come from the original). Filename keys such as `seed`, `steps`, `cfg` and `model` are read from the carried-over text. The `parameters` chunk is read from PNGs, and from EXIF UserComment in JPG/WebP (what this node and A1111 write). Images without it give an empty string, and the save node then traces the workflow as usual.
+
+## Image Filename (from loader)
+
+Gets the filename of a loaded image without swapping your loader. An IMAGE wire carries no filename, so the node follows its `image` input back through the workflow to the load node and reads that node's file widget.
+
+1. Wire any image into **Image Filename (from loader)**: straight from the loader, or from later in the chain (after an upscale or resize also works).
+2. Wire its `filename` output into the save node's `filename_prefix` (right-click the save node, convert the widget to an input if your ComfyUI needs it).
+
+- `filename` is the name without extension, e.g. `vera_042` for `vera_042.png`.
+- `image` passes the image through unchanged, so the node can sit inline or off to the side.
+- Works with core Load Image, Load Image (with Parameters), Load Image by Index, and other loaders whose widget holds an image file name or path (`.png`, `.jpg`, `.webp`, ...).
+- `fallback` is used (and a `[Image Filename]` warning logged) when nothing upstream names an image file, e.g. a generated image, or a list loader that only has a folder widget.
 
 ## Troubleshooting
 
